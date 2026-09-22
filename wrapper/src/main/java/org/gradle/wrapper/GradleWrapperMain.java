@@ -67,24 +67,23 @@ public class GradleWrapperMain {
     }
 
     /**
-     * Returns null when the running JVM meets the minimum the wrapper properties name, else the {@code java} of a JDK
-     * downloaded for the project.
+     * Returns null when the running JVM is within the range the wrapper properties name, else the {@code java} of a
+     * JDK downloaded for the project.
      */
     private static File sufficientJvm(String[] args, File rootDir, File propertiesFile) throws Exception {
         Properties wrapperProperties = load(propertiesFile);
         String version = System.getProperty("java.specification.version");
-        if (JvmProvisioner.currentJvmIsSufficient(wrapperProperties, version)) {
+        if (JvmProvisioner.currentJvmIsSuitable(wrapperProperties, version)) {
             return null;
         }
+        String problem = "Java " + version + " at " + System.getProperty("java.home") + " is "
+            + JvmProvisioner.violatedBound(wrapperProperties, version) + " this build supports";
         Logger logger = new Logger(Arrays.asList(args).contains("-q") || Arrays.asList(args).contains("--quiet"));
         File daemonJvmPropertiesFile = new File(rootDir, "gradle/gradle-daemon-jvm.properties");
         if (!daemonJvmPropertiesFile.isFile()) {
-            throw new RuntimeException("Java " + version + " at " + System.getProperty("java.home") + " is below the minimum Java "
-                + wrapperProperties.getProperty(JvmProvisioner.MINIMUM_JAVA_VERSION_PROPERTY) + " this build needs, and "
-                + daemonJvmPropertiesFile + " does not exist to download one from.");
+            throw new RuntimeException(problem + ", and " + daemonJvmPropertiesFile + " does not exist to download one from.");
         }
-        logger.log("Java " + version + " at " + System.getProperty("java.home") + " is below the minimum Java "
-            + wrapperProperties.getProperty(JvmProvisioner.MINIMUM_JAVA_VERSION_PROPERTY) + " this build needs. Downloading a JDK.");
+        logger.log(problem + ". Downloading a JDK.");
         int networkTimeout = WrapperExecutor.forWrapperPropertiesFile(propertiesFile).getConfiguration().getNetworkTimeout();
         IDownload download = new Download(logger, "gradlew", UNKNOWN_VERSION, networkTimeout);
         return new JvmProvisioner(logger, download, GradleUserHomeLookup.gradleUserHome()).provision(load(daemonJvmPropertiesFile));

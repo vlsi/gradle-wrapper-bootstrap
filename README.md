@@ -42,8 +42,11 @@ the distribution with `distributionSha256Sum`, as it does today.
 ## A JVM that is installed but too old
 
 The script takes the first JVM it finds without asking its version, because asking costs a JVM start on every run.
-The jar runs on that JVM, so the version is free there. `gradle-wrapper.properties` names `minimumJavaVersion=17`,
-the minimum the Gradle client needs. When the running JVM is older, the jar downloads the JDK from
+The jar runs on that JVM, so the version is free there. `gradle-wrapper.properties` names `minimumJavaVersion=17`
+and `maximumJavaVersion=25`, the range this Gradle release supports. The maximum exists because a Gradle release is
+tested against the JDKs that exist at the time, and a later JDK has broken the daemon more than once: the case where
+a machine defaults to the newest JDK and an older Gradle cannot start. When the running JVM is outside the range,
+the jar downloads the JDK from
 `gradle/gradle-daemon-jvm.properties` for this platform, verifies the hash, unpacks it into the same
 `$GRADLE_USER_HOME/jdks/wrapper/<sha256>/` directory the script uses, and relaunches itself on it. Downloads go
 through the wrapper's own `Download` class, so proxies and `systemProp.*` settings apply as they do for the
@@ -54,8 +57,9 @@ properties, the client runs on 17 and Gradle picks or downloads the daemon JVM w
 the wrapper did download a JDK, Gradle detects it as the client's JVM and runs the daemon on it, so there is no
 second download.
 
-Tested on macOS with `JAVA_HOME` pointing at Java 8: the jar reports the JVM as too old, downloads JDK 25, and the
-build runs on it. `GRADLE_OPTS` with `-Xmx` are carried over into the relaunch.
+Tested on macOS with `JAVA_HOME` pointing at Java 8 and at JDK 28-ea: the jar reports the JVM as outside the range,
+downloads JDK 25, and the build runs on it. With JDK 21 nothing is downloaded. `GRADLE_OPTS` with `-Xmx` are carried
+over into the relaunch.
 
 ## What moved from the scripts into the jar
 
@@ -77,8 +81,8 @@ What stayed in the script: the symlink loop (the script needs the properties fil
 
 - Publish `gradle-<version>-wrapper.jar` as a standalone artifact. Today `services.gradle.org` publishes only its
   `.sha256`, and the jar itself sits inside the distribution zip.
-- Add `wrapperUrl`, `wrapperSha256Sum`, and `minimumJavaVersion` to `gradle-wrapper.properties`, written by the
-  `wrapper` task.
+- Add `wrapperUrl`, `wrapperSha256Sum`, `minimumJavaVersion`, and `maximumJavaVersion` to
+  `gradle-wrapper.properties`, written by the `wrapper` task.
 - Add `toolchainSha256Sum.<OS>.<ARCH>` to `gradle-daemon-jvm.properties`, written by `updateDaemonJvm`. Without a
   hash the script refuses to download a JDK.
 - Generate `gradlew` from a wrapper-specific template rather than the `application` plugin's.

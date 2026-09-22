@@ -50,6 +50,7 @@ import java.util.zip.ZipInputStream;
  */
 public final class JvmProvisioner {
     public static final String MINIMUM_JAVA_VERSION_PROPERTY = "minimumJavaVersion";
+    public static final String MAXIMUM_JAVA_VERSION_PROPERTY = "maximumJavaVersion";
 
     private final Logger logger;
     private final IDownload download;
@@ -62,15 +63,31 @@ public final class JvmProvisioner {
     }
 
     /**
-     * Whether the running JVM satisfies the minimum the wrapper properties name.
-     * A missing property means any JVM is accepted, as before.
+     * Whether the running JVM is within the range the wrapper properties name.
+     * A missing bound is not checked, so without either property any JVM is accepted, as before.
+     * The maximum exists because a Gradle release is tested against the JDKs that exist at the time, and a later JDK
+     * has broken the daemon more than once.
      */
-    public static boolean currentJvmIsSufficient(Properties wrapperProperties, String specificationVersion) {
-        String minimum = wrapperProperties.getProperty(MINIMUM_JAVA_VERSION_PROPERTY);
-        if (minimum == null || minimum.trim().isEmpty()) {
-            return true;
+    public static boolean currentJvmIsSuitable(Properties wrapperProperties, String specificationVersion) {
+        int version = featureVersion(specificationVersion);
+        Integer minimum = bound(wrapperProperties, MINIMUM_JAVA_VERSION_PROPERTY);
+        Integer maximum = bound(wrapperProperties, MAXIMUM_JAVA_VERSION_PROPERTY);
+        return (minimum == null || version >= minimum) && (maximum == null || version <= maximum);
+    }
+
+    /** The bound the wrapper properties name, in the words for the message: {@code "below the minimum Java 17"}. */
+    public static String violatedBound(Properties wrapperProperties, String specificationVersion) {
+        int version = featureVersion(specificationVersion);
+        Integer minimum = bound(wrapperProperties, MINIMUM_JAVA_VERSION_PROPERTY);
+        if (minimum != null && version < minimum) {
+            return "below the minimum Java " + minimum;
         }
-        return featureVersion(specificationVersion) >= Integer.parseInt(minimum.trim());
+        return "above the maximum Java " + bound(wrapperProperties, MAXIMUM_JAVA_VERSION_PROPERTY);
+    }
+
+    private static Integer bound(Properties wrapperProperties, String property) {
+        String value = wrapperProperties.getProperty(property);
+        return value == null || value.trim().isEmpty() ? null : Integer.valueOf(value.trim());
     }
 
     /** {@code 8} for {@code "1.8"}, {@code 17} for {@code "17"}. */
