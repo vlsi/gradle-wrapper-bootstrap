@@ -1,0 +1,4 @@
+build/
+wrapper/build/
+.gradle/
+.kotlin/
