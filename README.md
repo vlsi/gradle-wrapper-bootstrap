@@ -25,7 +25,8 @@ The script does only what has to happen before a JVM exists:
 1. Locate the project directory. `$0` may be a chain of symlinks.
 2. Find a JVM: `JAVA_HOME`, then `java` on `PATH`. If neither exists, download the JDK that
    `gradle/gradle-daemon-jvm.properties` names for this OS and CPU, verify its `toolchainSha256Sum.<OS>.<ARCH>`, and
-   unpack it into `$GRADLE_USER_HOME/jdks/wrapper/<sha256>/`.
+   unpack it into `$GRADLE_USER_HOME/jdks/wrapper/<sha256>/`. The script does not check the version of the JVM it
+   found; the jar does, see below.
 3. Find the wrapper jar at `$GRADLE_USER_HOME/wrapper/jars/<sha256>/gradle-wrapper.jar`, where the sha256 is
    `wrapperSha256Sum` from `gradle/wrapper/gradle-wrapper.properties`. If it is missing, download `wrapperUrl`,
    verify the hash, and put it there.
@@ -37,6 +38,24 @@ Steps 2 and 3 are one `test -x` and one `test -f` on the hot path. Downloads nee
 
 The root of trust is the hash committed in `gradle-wrapper.properties`: the script verifies the jar, the jar verifies
 the distribution with `distributionSha256Sum`, as it does today.
+
+## A JVM that is installed but too old
+
+The script takes the first JVM it finds without asking its version, because asking costs a JVM start on every run.
+The jar runs on that JVM, so the version is free there. `gradle-wrapper.properties` names `minimumJavaVersion=17`,
+the minimum the Gradle client needs. When the running JVM is older, the jar downloads the JDK from
+`gradle/gradle-daemon-jvm.properties` for this platform, verifies the hash, unpacks it into the same
+`$GRADLE_USER_HOME/jdks/wrapper/<sha256>/` directory the script uses, and relaunches itself on it. Downloads go
+through the wrapper's own `Download` class, so proxies and `systemProp.*` settings apply as they do for the
+distribution. The tar.gz and zip archives are unpacked by the jar itself (`TarUnpacker`, `JvmProvisioner`).
+
+A JVM that is new enough is used as it is. With JDK 17 installed and `toolchainVersion=25` in the daemon JVM
+properties, the client runs on 17 and Gradle picks or downloads the daemon JVM with its own toolchain machinery. When
+the wrapper did download a JDK, Gradle detects it as the client's JVM and runs the daemon on it, so there is no
+second download.
+
+Tested on macOS with `JAVA_HOME` pointing at Java 8: the jar reports the JVM as too old, downloads JDK 25, and the
+build runs on it. `GRADLE_OPTS` with `-Xmx` are carried over into the relaunch.
 
 ## What moved from the scripts into the jar
 
@@ -58,7 +77,8 @@ What stayed in the script: the symlink loop (the script needs the properties fil
 
 - Publish `gradle-<version>-wrapper.jar` as a standalone artifact. Today `services.gradle.org` publishes only its
   `.sha256`, and the jar itself sits inside the distribution zip.
-- Add `wrapperUrl` and `wrapperSha256Sum` to `gradle-wrapper.properties`, written by the `wrapper` task.
+- Add `wrapperUrl`, `wrapperSha256Sum`, and `minimumJavaVersion` to `gradle-wrapper.properties`, written by the
+  `wrapper` task.
 - Add `toolchainSha256Sum.<OS>.<ARCH>` to `gradle-daemon-jvm.properties`, written by `updateDaemonJvm`. Without a
   hash the script refuses to download a JDK.
 - Generate `gradlew` from a wrapper-specific template rather than the `application` plugin's.

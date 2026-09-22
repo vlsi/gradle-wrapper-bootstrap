@@ -162,12 +162,12 @@ public final class EnvironmentJvmOptions {
     }
 
     /**
-     * Starts a child JVM with the options of the running JVM, these options, and the same main jar and
+     * Starts {@code javaExecutable} with the options of the running JVM, these options, and the same main jar and
      * arguments, then returns its exit code. The child inherits stdin, stdout, and stderr.
      */
-    public int relaunch(File mainJar, String[] args) throws IOException, InterruptedException {
+    public int relaunch(File javaExecutable, File mainJar, String[] args) throws IOException, InterruptedException {
         List<String> command = new ArrayList<String>();
-        command.add(new File(new File(System.getProperty("java.home"), "bin"), "java").getPath());
+        command.add(javaExecutable.getPath());
         // The options the script gave this JVM: the defaults, and the -D properties that describe the script.
         command.addAll(ManagementFactory.getRuntimeMXBean().getInputArguments());
         command.addAll(options);

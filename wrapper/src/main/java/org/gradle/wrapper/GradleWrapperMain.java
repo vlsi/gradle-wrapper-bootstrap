@@ -22,12 +22,19 @@ import org.gradle.cli.SystemPropertiesCommandLineConverter;
 import org.gradle.wrapper.bootstrap.EnvironmentJvmOptions;
 import org.gradle.wrapper.bootstrap.ScriptEnvironment;
 
+import org.gradle.wrapper.bootstrap.JvmProvisioner;
+
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.gradle.wrapper.Download.UNKNOWN_VERSION;
 
@@ -41,20 +48,61 @@ public class GradleWrapperMain {
     public static void main(String[] args) throws Exception {
         File wrapperJar = wrapperJar();
         Map<String, String> systemProperties = systemProperties();
-        EnvironmentJvmOptions jvmOptions = EnvironmentJvmOptions.fromEnvironment(System.getenv());
-        if (jvmOptions.requiresRelaunch(systemProperties) && !Boolean.parseBoolean(systemProperties.get(EnvironmentJvmOptions.RELAUNCHED_PROPERTY))) {
-            System.exit(jvmOptions.relaunch(wrapperJar, args));
-        }
-        if (!Boolean.parseBoolean(systemProperties.get(EnvironmentJvmOptions.RELAUNCHED_PROPERTY))) {
-            // A relaunched JVM already carries these options on its command line.
-            jvmOptions.applyTo(System.getProperties());
-        }
         ScriptEnvironment script = ScriptEnvironment.fromSystemProperties(systemProperties);
         File projectDir = script.projectDir();
         // A script that predates the projectDir property keeps the jar at <project>/gradle/wrapper/gradle-wrapper.jar.
         File rootDir = projectDir != null ? projectDir : rootDir(wrapperJar);
         File propertiesFile = projectDir != null ? WrapperExecutor.wrapperPropertiesForProjectDirectory(projectDir) : wrapperProperties(wrapperJar);
+
+        if (!Boolean.parseBoolean(systemProperties.get(EnvironmentJvmOptions.RELAUNCHED_PROPERTY))) {
+            // The child of a relaunch runs on the right JVM with the right options already; only the first JVM decides.
+            EnvironmentJvmOptions jvmOptions = EnvironmentJvmOptions.fromEnvironment(System.getenv());
+            File java = sufficientJvm(args, rootDir, propertiesFile);
+            if (java != null || jvmOptions.requiresRelaunch(systemProperties)) {
+                System.exit(jvmOptions.relaunch(java != null ? java : currentJava(), wrapperJar, args));
+            }
+            jvmOptions.applyTo(System.getProperties());
+        }
         prepareWrapper(script.convertArguments(args), rootDir, propertiesFile).execute();
+    }
+
+    /**
+     * Returns null when the running JVM meets the minimum the wrapper properties name, else the {@code java} of a JDK
+     * downloaded for the project.
+     */
+    private static File sufficientJvm(String[] args, File rootDir, File propertiesFile) throws Exception {
+        Properties wrapperProperties = load(propertiesFile);
+        String version = System.getProperty("java.specification.version");
+        if (JvmProvisioner.currentJvmIsSufficient(wrapperProperties, version)) {
+            return null;
+        }
+        Logger logger = new Logger(Arrays.asList(args).contains("-q") || Arrays.asList(args).contains("--quiet"));
+        File daemonJvmPropertiesFile = new File(rootDir, "gradle/gradle-daemon-jvm.properties");
+        if (!daemonJvmPropertiesFile.isFile()) {
+            throw new RuntimeException("Java " + version + " at " + System.getProperty("java.home") + " is below the minimum Java "
+                + wrapperProperties.getProperty(JvmProvisioner.MINIMUM_JAVA_VERSION_PROPERTY) + " this build needs, and "
+                + daemonJvmPropertiesFile + " does not exist to download one from.");
+        }
+        logger.log("Java " + version + " at " + System.getProperty("java.home") + " is below the minimum Java "
+            + wrapperProperties.getProperty(JvmProvisioner.MINIMUM_JAVA_VERSION_PROPERTY) + " this build needs. Downloading a JDK.");
+        int networkTimeout = WrapperExecutor.forWrapperPropertiesFile(propertiesFile).getConfiguration().getNetworkTimeout();
+        IDownload download = new Download(logger, "gradlew", UNKNOWN_VERSION, networkTimeout);
+        return new JvmProvisioner(logger, download, GradleUserHomeLookup.gradleUserHome()).provision(load(daemonJvmPropertiesFile));
+    }
+
+    private static File currentJava() {
+        return new File(new File(System.getProperty("java.home"), "bin"), "java");
+    }
+
+    private static Properties load(File file) throws IOException {
+        Properties properties = new Properties();
+        InputStream in = new FileInputStream(file);
+        try {
+            properties.load(in);
+        } finally {
+            in.close();
+        }
+        return properties;
     }
 
     private static Map<String, String> systemProperties() {
